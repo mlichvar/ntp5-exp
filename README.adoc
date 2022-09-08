@@ -1,0 +1,55 @@
+= ntp5-exp
+
+This is an experimental implementation of an NTPv5+NTPv4 client and server,
+following
+https://datatracker.ietf.org/doc/html/draft-mlichvar-ntp-ntpv5[this] draft.
+Both basic and interleaved measurement modes are supported. The protocol
+version is negotiated if not specified on the command line. 
+
+It implements only the network protocol and a simple source selection accepting
+all sources that don't appear to be in a synchronization loop. It does not
+control the system clock.
+
+No privileges are required. The default server port is 10123. Multiple
+instances can be running on the same host using different ports. Servers to be
+polled by the client can be specified as `HOSTNAME:PORT`.
+
+== Usage
+
+```
+usage: ntpnode.py [-h] [-p PORT] [-v VERSION] [-i POLL] [-f NUMBER] [-r RATE] [-l] [-x] [-n] [-d] [servers ...]
+
+Experimental NTPv5+NTPv4 client and server.
+
+positional arguments:
+  servers               specify servers
+
+options:
+  -h, --help            show this help message and exit
+  -p PORT, --port PORT  specify port of this server (default 10123)
+  -v VERSION, --version VERSION
+                        specify client NTP version (default negotiation)
+  -i POLL, --poll POLL  specify polling interval in log2 seconds (default 2)
+  -f NUMBER, --refids-fragments NUMBER
+                        specificy number of Bloom filter fragments (default 4)
+  -r RATE, --dispersion-rate RATE
+                        specify dispersion rate (default 15e-6)
+  -l, --local           enable local reference
+  -x, --xleave          send requests in interleaved mode
+  -n, --no-refid        suppress NTPv4 reference ID loop check
+  -d, --debug           increase debug level
+```
+
+== Example
+
+A stratum-1 server and four clients polling that server and also one another in
+a loop can be started like this:
+
+```
+$ ./ntpnode.py -p 10000 -l
+$ ./ntpnode.py -p 10001 -i 0 127.0.0.1:10000 127.0.0.1:10002
+$ ./ntpnode.py -p 10002 -i 0 127.0.0.1:10000 127.0.0.1:10003
+$ ./ntpnode.py -p 10003 -i 0 127.0.0.1:10000 127.0.0.1:10004
+$ ./ntpnode.py -p 10004 -i 0 127.0.0.1:10000 127.0.0.1:10001
+```
+
