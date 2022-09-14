@@ -545,6 +545,7 @@ class NtpNode:
         self.poll = poll
         self.no_refid_loop = no_refid_loop
 
+        self.next_poll = time.monotonic()
         self.clients = {}
         self.own_addresses = set()
         self.selection_delays = {}
@@ -612,26 +613,29 @@ class NtpNode:
                     self.server.root_delay = sample.root_delay
                     self.server.root_disp = sample.root_disp
 
-    def run(self):
-        while True:
+    def get_descriptors(self):
+        return list(self.clients.keys()) + self.server_sockets
+
+    def get_timeout(self):
+        return max(0.0, self.next_poll - time.monotonic())
+
+    def process_events(self, wait=True):
+        timeout = self.get_timeout() if wait else 0.0
+        rlist, _, _ = select.select(self.get_descriptors(), [], [], timeout)
+
+        for sock in rlist:
+            if sock in self.server_sockets:
+                self.server.receive_request(sock)
+            elif sock in self.clients:
+                self.clients[sock].receive_response(sock)
+
+        if self.get_timeout() <= 0.0:
+            self.select_sources()
+
             for sock, client in self.clients.items():
                 client.send_request(sock)
 
-            next_poll = time.monotonic() + 2**self.poll
-
-            while True:
-                timeout = next_poll - time.monotonic()
-                if timeout <= 0:
-                    break
-                rlist, _, _ = select.select(list(self.clients.keys()) + self.server_sockets,
-                                            [], [], timeout)
-                for sock in rlist:
-                    if sock in self.server_sockets:
-                        self.server.receive_request(sock)
-                    elif sock in self.clients:
-                        self.clients[sock].receive_response(sock)
-
-            self.select_sources()
+            self.next_poll = time.monotonic() + 2**self.poll
 
 
 if __name__ == "__main__":
@@ -663,4 +667,6 @@ if __name__ == "__main__":
 
     node = NtpNode(args.local_reference, args.port, args.dispersion_rate, args.no_refid_loop,
                    args.servers, args.version, args.poll, args.interleaved, args.refids_fragments)
-    node.run()
+
+    while True:
+        node.process_events()
