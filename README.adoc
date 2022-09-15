@@ -7,8 +7,8 @@ Both basic and interleaved measurement modes are supported. The protocol
 version is negotiated if not specified on the command line. 
 
 It implements only the network protocol and a simple source selection accepting
-all sources that don't appear to be in a synchronization loop. It does not
-control the system clock.
+all sources that don't appear to be in a synchronization loop with a
+configurable limit on root distance. It does not control the system clock.
 
 No privileges are required. The default server port is 10123. Multiple
 instances can be running on the same host using different ports. Servers to be
@@ -34,6 +34,8 @@ options:
                         specificy number of Bloom filter fragments (default 4)
   -r RATE, --dispersion-rate RATE
                         specify dispersion rate (default 15e-6)
+  -m DIST, --max-distance DIST
+                        specify maximum acceptable root distance (default 1.0)
   -l, --local           enable local reference
   -x, --xleave          send requests in interleaved mode
   -n, --no-refid        suppress NTPv4 reference ID loop check

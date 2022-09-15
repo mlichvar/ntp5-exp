@@ -540,8 +540,9 @@ class NtpServer:
         self.sock.close()
 
 class NtpNode:
-    def __init__(self, local_reference, own_port, dispersion_rate, no_refid_loop,
+    def __init__(self, local_reference, own_port, max_distance, dispersion_rate, no_refid_loop,
                  servers, version, poll, interleaved, refids_fragments):
+        self.max_distance = max_distance
         self.poll = poll
         self.no_refid_loop = no_refid_loop
 
@@ -586,6 +587,8 @@ class NtpNode:
 
             if client.sample is None:
                 logging.info("  {}: Not selected (missing sample)".format(address))
+            elif client.sample.root_delay / 2 + client.sample.root_disp > self.max_distance:
+                logging.info("  {}: Not selected (distance too large)".format(address))
             elif self.server.own_reference_id & client.reference_ids == self.server.own_reference_id or \
                  (not self.no_refid_loop and client.reference_id is not None and \
                   str(ipaddress.IPv4Address(client.reference_id)) in self.own_addresses):
@@ -653,6 +656,8 @@ if __name__ == "__main__":
                         default=4, help="specificy number of Bloom filter fragments (default 4)")
     parser.add_argument("-r", "--dispersion-rate", dest="dispersion_rate", metavar="RATE", type=float,
                         default=15e-6, help="specify dispersion rate (default 15e-6)")
+    parser.add_argument("-m", "--max-distance", dest="max_distance", metavar="DIST", type=float,
+                        default=1.0, help="specify maximum acceptable root distance (default 1.0)")
     parser.add_argument("-l", "--local", dest="local_reference", action="store_const", const=True,
                         default=False, help="enable local reference")
     parser.add_argument("-x", "--xleave", dest="interleaved", action="store_const", const=True,
@@ -667,7 +672,7 @@ if __name__ == "__main__":
     logging.basicConfig(format="%(message)s")
     logging.getLogger().setLevel(logging.DEBUG if args.debug > 0  else logging.INFO)
 
-    node = NtpNode(args.local_reference, args.port, args.dispersion_rate, args.no_refid_loop,
+    node = NtpNode(args.local_reference, args.port, args.max_distance, args.dispersion_rate, args.no_refid_loop,
                    args.servers, args.version, args.poll, args.interleaved, args.refids_fragments)
 
     while True:
