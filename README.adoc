@@ -14,6 +14,8 @@ No privileges are required. The default server port is 10123. Multiple
 instances can be running on the same host using different ports. Servers to be
 polled by the client can be specified as `HOSTNAME:PORT`.
 
+A script for analyzing synchronization loops in different topologies is provided.
+
 == Usage
 
 ```
@@ -42,6 +44,33 @@ options:
   -d, --debug           increase debug level
 ```
 
+```
+usage: network.py [-h] [-p PORT] [-i POLL] [-f NUMBER] [-r RATE] [-m DIST] [-d]
+                  primary_nodes secondary_nodes topology
+
+Test NTPv5 nodes in simulated network.
+
+positional arguments:
+  primary_nodes         number of stratum=1 nodes
+  secondary_nodes       number of stratum>1 nodes
+  topology              network topology of stratum>1 nodes (chain, uniring, biring, mesh)
+
+options:
+  -h, --help            show this help message and exit
+  -p PORT, --first-port PORT
+                        specify port of first node (default 10123)
+  -v VERSION, --version VERSION
+                        specify client NTP version (default negotiation)
+  -i POLL, --poll POLL  specify polling interval in log2 seconds (default 0)
+  -f NUMBER, --refids-fragments NUMBER
+                        specify number of Bloom filter fragments (default 4)
+  -r RATE, --dispersion-rate RATE
+                        specify dispersion rate (default 5e-3)
+  -m DIST, --max-distance DIST
+                        specify dispersion rate (default 1e-1)
+  -d, --debug           increase debug level
+```
+
 == Example
 
 A stratum-1 server and four clients polling that server and also one another in
@@ -49,9 +78,37 @@ a loop can be started like this:
 
 ```
 $ ./ntpnode.py -p 10000 -l
-$ ./ntpnode.py -p 10001 -i 0 127.0.0.1:10000 127.0.0.1:10002
-$ ./ntpnode.py -p 10002 -i 0 127.0.0.1:10000 127.0.0.1:10003
-$ ./ntpnode.py -p 10003 -i 0 127.0.0.1:10000 127.0.0.1:10004
-$ ./ntpnode.py -p 10004 -i 0 127.0.0.1:10000 127.0.0.1:10001
+$ ./ntpnode.py -p 10001 -i 0 127.0.0.1:10004 127.0.0.1:10000
+$ ./ntpnode.py -p 10002 -i 0 127.0.0.1:10001 127.0.0.1:10000
+$ ./ntpnode.py -p 10003 -i 0 127.0.0.1:10002 127.0.0.1:10000
+$ ./ntpnode.py -p 10004 -i 0 127.0.0.1:10003 127.0.0.1:10000
 ```
 
+The same configuration can be tested for synchronization loops with one command
+like this:
+
+```
+$ ./network.py 1 4 uniring
+Network:
+  0
+  1 <- [4, 0]
+  2 <- [1]
+  3 <- [2]
+  4 <- [3]
+Selection at 0.0:
+  0 <- []
+  1 <- []
+  2 <- []
+  3 <- []
+  4 <- []
+Looped nodes: []
+...
+Selection at 14.0:
+  0 <- []
+  1 <- [0, 4]
+  2 <- [1]
+  3 <- [2]
+  4 <- [3]
+Looped nodes: [1, 2, 3, 4]
+...
+```
