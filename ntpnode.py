@@ -653,7 +653,7 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--poll", dest="poll", type=int,
                         default=2, help="specify polling interval in log2 seconds (default 2)")
     parser.add_argument("-f", "--refids-fragments", dest="refids_fragments", metavar="NUMBER", type=int,
-                        default=4, help="specificy number of Bloom filter fragments (default 4)")
+                        default=4, help="specify number of Bloom filter fragments (default 4)")
     parser.add_argument("-r", "--dispersion-rate", dest="dispersion_rate", metavar="RATE", type=float,
                         default=15e-6, help="specify dispersion rate (default 15e-6)")
     parser.add_argument("-m", "--max-distance", dest="max_distance", metavar="DIST", type=float,
