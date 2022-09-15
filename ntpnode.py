@@ -549,6 +549,7 @@ class NtpNode:
         self.clients = {}
         self.own_addresses = set()
         self.selection_delays = {}
+        self.selected_sources = []
 
         for server in servers:
             if ':' in server:
@@ -598,6 +599,7 @@ class NtpNode:
             client.sample = None
 
         selected_sources.sort(key=lambda s: s[1].root_delay / 2 + s[1].root_disp + 0.001 * s[1].stratum)
+        self.selected_sources = [s[0] for s in selected_sources]
 
         self.server.reference_ids = self.server.own_reference_id
 
