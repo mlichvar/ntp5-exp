@@ -231,6 +231,7 @@ class NtpClient:
 
         self.reference_ids = 0
         self.next_refids_fragment = 0
+        self.complete_refids = False
 
         self.last_request = None
         self.prev_request = None
@@ -310,6 +311,7 @@ class NtpClient:
             self.next_refids_fragment += 1
         else:
             self.next_refids_fragment = 0
+            self.complete_refids = True
 
     def receive_response(self, sock):
         try:
@@ -339,11 +341,6 @@ class NtpClient:
                 logging.info("  Bogus response")
                 return
             interleaved = response.flags & Ntp5Flag.INTERLEAVED
-            if response.reference_ids_resp is not None:
-                self.merge_refids_fragment(int.from_bytes(response.reference_ids_resp, byteorder='big'))
-            else:
-                # Force a loop to be detected
-                self.reference_ids = (1 << (REFERENCE_IDS_OCTETS * 8)) - 1
         elif response.version == 4:
             if response.origin_ts == self.last_request.receive_ts:
                 interleaved = True
@@ -362,6 +359,13 @@ class NtpClient:
                 response.root_delay / 2 + response.root_disp > 16:
             logging.info("  Unsynchronized response")
             return
+
+        if response.version == 5:
+            if response.reference_ids_resp is not None:
+                self.merge_refids_fragment(int.from_bytes(response.reference_ids_resp, byteorder='big'))
+            else:
+                # Force a loop to be detected
+                self.reference_ids = (1 << (REFERENCE_IDS_OCTETS * 8)) - 1
 
         if interleaved:
             T1 = self.prev_transmit_ts
@@ -589,6 +593,8 @@ class NtpNode:
                 logging.info("  {}: Not selected (missing sample)".format(address))
             elif client.sample.root_delay / 2 + client.sample.root_disp > self.max_distance:
                 logging.info("  {}: Not selected (distance too large)".format(address))
+            elif client.version == 5 and not client.complete_refids:
+                logging.info("  {}: Not selected (waiting for complete refids)".format(address))
             elif self.server.own_reference_id & client.reference_ids == self.server.own_reference_id or \
                  (not self.no_refid_loop and client.reference_id is not None and \
                   str(ipaddress.IPv4Address(client.reference_id)) in self.own_addresses):
