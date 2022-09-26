@@ -40,6 +40,8 @@ if __name__ == "__main__":
                         default=0, help="specify client NTP version (default negotiation)")
     parser.add_argument("-i", "--poll", dest="poll", type=int,
                         default=0, help="specify polling interval in log2 seconds (default 0)")
+    parser.add_argument("-s", "--stop", dest="stop_polls", metavar="POLLS", type=int,
+                        default=0, help="stop after POLLS identical selections")
     parser.add_argument("-f", "--refids-fragments", dest="refids_fragments", metavar="NUMBER", type=int,
                         default=4, help="specify number of Bloom filter fragments (default 4)")
     parser.add_argument("-r", "--dispersion-rate", dest="dispersion_rate", metavar="RATE", type=float,
@@ -94,7 +96,10 @@ if __name__ == "__main__":
                                      args.dispersion_rate,
                                      True, servers, args.version, args.poll, False, args.refids_fragments))
 
+    last_sels = []
+    unchanged_sels = 0
     start_time = time.monotonic()
+
     while True:
         descriptors = []
         timeout = 1e10
@@ -130,3 +135,11 @@ if __name__ == "__main__":
                         break
 
             print("Looped nodes: {}".format(looped))
+
+            if sels == last_sels:
+                unchanged_sels += 1
+                if unchanged_sels >= args.stop_polls:
+                    break
+            else:
+                unchanged_sels = 0
+            last_sels = sels
