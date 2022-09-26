@@ -92,7 +92,7 @@ if __name__ == "__main__":
 
         nodes.append(ntpnode.NtpNode(False, args.first_port + args.primary_nodes + i, args.max_distance,
                                      args.dispersion_rate,
-                                     False, servers, args.version, args.poll, False, args.refids_fragments))
+                                     True, servers, args.version, args.poll, False, args.refids_fragments))
 
     start_time = time.monotonic()
     while True:
