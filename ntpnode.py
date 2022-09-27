@@ -364,8 +364,8 @@ class NtpClient:
             if response.reference_ids_resp is not None:
                 self.merge_refids_fragment(int.from_bytes(response.reference_ids_resp, byteorder='big'))
             else:
-                # Force a loop to be detected
-                self.reference_ids = (1 << (REFERENCE_IDS_OCTETS * 8)) - 1
+                # Server cannot be synchronized to other servers (no loop)
+                self.reference_ids = 0
 
         if interleaved:
             T1 = self.prev_transmit_ts
