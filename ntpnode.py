@@ -62,6 +62,9 @@ class NtpEF(enum.IntEnum):
     REFERENCE_IDS_RESP = 0xf504
     SERVER_INFO = 0xf505
     CORRECTION = 0xf506
+    DRAFT_ID = 0xf5ff
+
+OUR_DRAFT_ID = "draft-mlichvar-ntp-ntpv5-05+    "
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
@@ -103,6 +106,7 @@ class NtpMessage:
     server_info: tuple = None # (min version, max version)
     reference_ids_req: tuple = None # (offset, length)
     reference_ids_resp: bytes = None
+    draft_id: str = None
 
     @classmethod
     def decode(cls, message):
@@ -136,7 +140,7 @@ class NtpMessage:
             raise ValueError("Invalid version {}".format(version))
 
         extensions = message[48:]
-        server_info = reference_ids_req = reference_ids_resp = None
+        server_info = reference_ids_req = reference_ids_resp = draft_id = None
 
         while len(extensions) > 0:
             # Ignore NTPv4 MAC
@@ -153,13 +157,18 @@ class NtpMessage:
                 reference_ids_resp = extensions[4:ef_len]
             elif ef_type == NtpEF.SERVER_INFO:
                 server_info = struct.unpack("!BB", extensions[4:6])
+            elif ef_type == NtpEF.DRAFT_ID:
+                try:
+                    draft_id = extensions[4:ef_len].decode('ascii')
+                except UnicodeDecodeError:
+                    pass
 
             extensions = extensions[(ef_len + 3) & 0xfffc:]
 
         return cls(leap, version, mode, stratum, poll, precision, root_delay, root_disp,
                    receive_ts, transmit_ts, scale, flags, era, timescale_offset,
                    server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
-                   server_info, reference_ids_req, reference_ids_resp)
+                   server_info, reference_ids_req, reference_ids_resp, draft_id)
 
     def get_rint(self, value):
         if self.version == 5:
@@ -196,6 +205,8 @@ class NtpMessage:
                     struct.pack("!H", self.reference_ids_req[0]) + (self.reference_ids_req[1] - 2) * " ".encode())
         if self.reference_ids_resp is not None:
             message += self.encode_ef(NtpEF.REFERENCE_IDS_RESP, self.reference_ids_resp)
+        if self.draft_id is not None:
+            message += self.encode_ef(NtpEF.DRAFT_ID, self.draft_id.encode('ascii'))
 
         if len(message) < target_len and self.version == 5:
             assert len(message) + 4 <= target_len
@@ -248,7 +259,7 @@ class NtpClient:
 
         scale = flags = era = offset = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
-        server_info = reference_ids_req = None
+        server_info = reference_ids_req = draft_id = None
 
         receive_ts = transmit_ts = 0
 
@@ -266,6 +277,7 @@ class NtpClient:
             server_info = (0, 0)
             reference_ids_req = (self.next_refids_fragment * (REFERENCE_IDS_OCTETS // self.refids_fragments),
                                  (REFERENCE_IDS_OCTETS // self.refids_fragments))
+            draft_id = OUR_DRAFT_ID
         elif self.version == 4:
             reference_id = origin_ts = 0
             reference_ts = Ntp4MagicRefTs.NTP5 if self.auto_version else 0
@@ -279,7 +291,8 @@ class NtpClient:
         return NtpMessage(0, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
                           receive_ts, transmit_ts, scale, flags, era, offset, server_cookie,
                           client_cookie, reference_id, reference_ts, origin_ts,
-                          server_info=server_info, reference_ids_req=reference_ids_req)
+                          server_info=server_info, reference_ids_req=reference_ids_req,
+                          draft_id=draft_id)
 
     def send_request(self, sock):
         self.missed_responses += 1
@@ -430,7 +443,7 @@ class NtpServer:
     def make_response(self, request, receive_ts, transmit_ts):
         scale = flags = era = timescale_offset = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
-        server_info = reference_ids_resp = None
+        server_info = reference_ids_resp = draft_id = None
 
         root_disp = self.root_disp
         if self.stratum > 1:
@@ -454,6 +467,8 @@ class NtpServer:
             if request.reference_ids_req is not None:
                 reference_ids_resp = self.reference_ids.to_bytes(REFERENCE_IDS_OCTETS, byteorder='big') \
                         [request.reference_ids_req[0]:sum(request.reference_ids_req)]
+            if request.draft_id is not None:
+                draft_id = OUR_DRAFT_ID[:len(request.draft_id)]
 
         elif request.version == 4:
             if request.receive_ts != request.transmit_ts and \
@@ -475,7 +490,8 @@ class NtpServer:
         return NtpMessage(self.leap, request.version, NtpMode.SERVER, self.stratum, request.poll, self.precision,
                           self.root_delay, root_disp, receive_ts, transmit_ts, scale, flags, era,
                           timescale_offset, server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
-                          server_info=server_info, reference_ids_resp=reference_ids_resp)
+                          server_info=server_info, reference_ids_resp=reference_ids_resp,
+                          draft_id=draft_id)
 
     def save_timestamps(self, receive_ts, transmit_ts):
         assert(receive_ts not in self.saved_timestamps)
