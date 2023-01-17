@@ -45,7 +45,7 @@ class NtpMode(enum.IntEnum):
     CLIENT = 3
     SERVER = 4
 
-class Ntp5Scale(enum.IntEnum):
+class Ntp5Timescale(enum.IntEnum):
     UTC = 0
     TAI = 1
     UT1 = 2
@@ -64,7 +64,7 @@ class NtpEF(enum.IntEnum):
     CORRECTION = 0xf506
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-mlichvar-ntp-ntpv5-05+    "
+OUR_DRAFT_ID = "draft-mlichvar-ntp-ntpv5-06     "
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
@@ -90,10 +90,9 @@ class NtpMessage:
     transmit_ts: int
 
     # NTPv5-specific
-    scale: Ntp5Scale
-    flags: int
+    timescale: Ntp5Timescale
     era: int
-    timescale_offset: int
+    flags: int
     server_cookie: int
     client_cookie: int
 
@@ -120,11 +119,9 @@ class NtpMessage:
         mode = lvm & 7;
 
         if version == 5:
-            _, scale_stratum, poll, precision, flags, era, timescale_offset, \
+            _, stratum, poll, precision, timescale, era, flags, \
                 root_delay, root_disp, server_cookie, client_cookie, receive_ts, transmit_ts = \
-                     struct.unpack("!BBbbBBhIIQQQQ", message[:48])
-            scale = scale_stratum >> 4
-            stratum = scale_stratum & 0xf
+                     struct.unpack("!BBbbBBHIIQQQQ", message[:48])
             root_delay = root_delay / 2**28
             root_disp = root_disp / 2**28
             reference_id = reference_ts = origin_ts = None
@@ -132,8 +129,8 @@ class NtpMessage:
             _, stratum, poll, precision, root_delay, root_disp, reference_id, \
                 reference_ts, origin_ts, receive_ts, transmit_ts = \
                      struct.unpack("!BBbbIIIQQQQ", message[:48])
-            scale = Ntp5Scale.UTC
-            flags = era = timescale_offset = server_cookie = client_cookie = None
+            timescale = Ntp5Timescale.UTC
+            era = flags = server_cookie = client_cookie = None
             root_delay = root_delay / 2**16
             root_disp = root_disp / 2**16
         else:
@@ -166,7 +163,7 @@ class NtpMessage:
             extensions = extensions[(ef_len + 3) & 0xfffc:]
 
         return cls(leap, version, mode, stratum, poll, precision, root_delay, root_disp,
-                   receive_ts, transmit_ts, scale, flags, era, timescale_offset,
+                   receive_ts, transmit_ts, timescale, era, flags,
                    server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
                    server_info, reference_ids_req, reference_ids_resp, draft_id)
 
@@ -183,8 +180,8 @@ class NtpMessage:
     def encode(self, target_len=0):
         stratum = self.stratum if self.stratum < 16 else 0
         if self.version == 5:
-            header = struct.pack("!BBbbBBhIIQQQQ", (self.leap << 6) | (self.version << 3) | self.mode, stratum,
-                                 self.poll, self.precision, self.flags, self.era, self.timescale_offset,
+            header = struct.pack("!BBbbBBHIIQQQQ", (self.leap << 6) | (self.version << 3) | self.mode, stratum,
+                                 self.poll, self.precision, self.timescale, self.era, self.flags,
                                  self.get_rint(self.root_delay), self.get_rint(self.root_disp),
                                  self.server_cookie, self.client_cookie, self.receive_ts, self.transmit_ts)
         elif self.version == 4:
@@ -236,7 +233,7 @@ class NtpClient:
             self.auto_version = True;
         self.interleaved = interleaved
         self.refids_fragments = refids_fragments
-        self.scale = Ntp5Scale.UTC
+        self.timescale = Ntp5Timescale.UTC
 
         self.missed_responses = 0
 
@@ -257,16 +254,16 @@ class NtpClient:
                 self.prev_response.version == self.version and \
                 self.missed_responses <= 4
 
-        scale = flags = era = offset = server_cookie = client_cookie = None
+        timescale = era = flags = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
         server_info = reference_ids_req = draft_id = None
 
         receive_ts = transmit_ts = 0
 
         if self.version == 5:
-            scale = self.scale
+            timescale = self.timescale
             flags = 0
-            era = offset = 0
+            era = 0
             if self.interleaved:
                 flags |= Ntp5Flag.INTERLEAVED
             if interleaved:
@@ -289,7 +286,7 @@ class NtpClient:
             assert False
 
         return NtpMessage(0, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
-                          receive_ts, transmit_ts, scale, flags, era, offset, server_cookie,
+                          receive_ts, transmit_ts, timescale, flags, era, server_cookie,
                           client_cookie, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
                           draft_id=draft_id)
@@ -441,7 +438,7 @@ class NtpServer:
             self.reference_id = 0
 
     def make_response(self, request, receive_ts, transmit_ts):
-        scale = flags = era = timescale_offset = server_cookie = client_cookie = None
+        timescale = era = flags = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
         server_info = reference_ids_resp = draft_id = None
 
@@ -450,8 +447,8 @@ class NtpServer:
             root_disp += abs(transmit_ts - self.reference_ts) / 2**32 * self.dispersion_rate
 
         if request.version == 5:
-            scale = Ntp5Scale.UTC
-            flags = era = timescale_offset = 0
+            timescale = Ntp5Timescale.UTC
+            flags = era = 0
 
             if request.flags & Ntp5Flag.INTERLEAVED:
                 if request.server_cookie != 0 and request.server_cookie in self.saved_timestamps:
@@ -488,8 +485,8 @@ class NtpServer:
                 reference_ts = self.reference_ts
 
         return NtpMessage(self.leap, request.version, NtpMode.SERVER, self.stratum, request.poll, self.precision,
-                          self.root_delay, root_disp, receive_ts, transmit_ts, scale, flags, era,
-                          timescale_offset, server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
+                          self.root_delay, root_disp, receive_ts, transmit_ts, timescale, era, flags,
+                          server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_resp=reference_ids_resp,
                           draft_id=draft_id)
 
