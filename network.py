@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
             if sels == last_sels:
                 unchanged_sels += 1
-                if unchanged_sels >= args.stop_polls:
+                if args.stop_polls > 0 and unchanged_sels >= args.stop_polls:
                     break
             else:
                 unchanged_sels = 0
