@@ -119,14 +119,15 @@ class NtpMessage:
 
         lvm = message[0]
 
-        leap = lvm >> 6
+        leap = NtpLeap(lvm >> 6)
         version = (lvm >> 3) & 7
-        mode = lvm & 7
+        mode = NtpMode(lvm & 7)
 
         if version == 5:
             _, stratum, poll, precision, timescale, era, flags, \
                 root_delay, root_disp, server_cookie, client_cookie, receive_ts, transmit_ts = \
                      struct.unpack("!BBbbBBHIIQQQQ", message[:48])
+            timescale = Ntp5Timescale(timescale)
             root_delay = root_delay / 2**28
             root_disp = root_disp / 2**28
             reference_id = reference_ts = origin_ts = None
@@ -167,7 +168,7 @@ class NtpMessage:
                 if sec_scale in (Ntp5Timescale.UTC, ):
                     if secondary_rx_ts is None:
                         secondary_rx_ts = {}
-                    secondary_rx_ts[sec_scale] = (sec_era, sec_ts)
+                    secondary_rx_ts[Ntp5Timescale(sec_scale)] = (sec_era, sec_ts)
             elif ef_type == NtpEF.DRAFT_ID:
                 try:
                     draft_id = extensions[4:ef_len].decode('ascii')
@@ -308,7 +309,7 @@ class NtpClient:
         else:
             assert False
 
-        return NtpMessage(0, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
+        return NtpMessage(NtpLeap.NORMAL, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
                           receive_ts, transmit_ts, timescale, flags, era, server_cookie,
                           client_cookie, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
