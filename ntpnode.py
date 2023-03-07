@@ -119,9 +119,9 @@ class NtpMessage:
 
         lvm = message[0]
 
-        leap = lvm >> 6;
-        version = (lvm >> 3) & 7;
-        mode = lvm & 7;
+        leap = lvm >> 6
+        version = (lvm >> 3) & 7
+        mode = lvm & 7
 
         if version == 5:
             _, stratum, poll, precision, timescale, era, flags, \
@@ -248,10 +248,10 @@ class NtpClient:
         self.precision = -20
         if version in (4, 5):
             self.version = version
-            self.auto_version = False;
+            self.auto_version = False
         else:
             self.version = 4
-            self.auto_version = True;
+            self.auto_version = True
         self.interleaved = interleaved
         self.refids_fragments = refids_fragments
         self.timescale = Ntp5Timescale.UTC
