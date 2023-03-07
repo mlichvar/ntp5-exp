@@ -64,7 +64,7 @@ class NtpEF(enum.IntEnum):
     CORRECTION = 0xf506
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-mlichvar-ntp-ntpv5-06     "
+OUR_DRAFT_ID = "draft-mlichvar-ntp-ntpv5-07     "
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
@@ -102,7 +102,7 @@ class NtpMessage:
     origin_ts: int
 
     # Extension fields
-    server_info: tuple = None # (min version, max version)
+    server_info: int = None # bit field
     reference_ids_req: tuple = None # (offset, length)
     reference_ids_resp: bytes = None
     draft_id: str = None
@@ -152,8 +152,8 @@ class NtpMessage:
                 reference_ids_req = (struct.unpack("!H", extensions[4:6])[0], ef_len - 4)
             elif ef_type == NtpEF.REFERENCE_IDS_RESP:
                 reference_ids_resp = extensions[4:ef_len]
-            elif ef_type == NtpEF.SERVER_INFO:
-                server_info = struct.unpack("!BB", extensions[4:6])
+            elif ef_type == NtpEF.SERVER_INFO and ef_len == 8:
+                server_info = struct.unpack("!H", extensions[4:6])[0]
             elif ef_type == NtpEF.DRAFT_ID:
                 try:
                     draft_id = extensions[4:ef_len].decode('ascii')
@@ -196,7 +196,7 @@ class NtpMessage:
 
         if self.server_info is not None:
             message += self.encode_ef(NtpEF.SERVER_INFO,
-                                      struct.pack("!BBH", self.server_info[0], self.server_info[1], 0))
+                                      struct.pack("!HH", self.server_info, 0))
         if self.reference_ids_req is not None:
             message += self.encode_ef(NtpEF.REFERENCE_IDS_REQ,
                     struct.pack("!H", self.reference_ids_req[0]) + (self.reference_ids_req[1] - 2) * " ".encode())
@@ -271,7 +271,7 @@ class NtpClient:
             else:
                 server_cookie = 0
             client_cookie = random.getrandbits(64)
-            server_info = (0, 0)
+            server_info = 0
             reference_ids_req = (self.next_refids_fragment * (REFERENCE_IDS_OCTETS // self.refids_fragments),
                                  (REFERENCE_IDS_OCTETS // self.refids_fragments))
             draft_id = OUR_DRAFT_ID
@@ -460,7 +460,7 @@ class NtpServer:
             client_cookie = request.client_cookie
 
             if request.server_info is not None:
-                server_info = (4, 5)
+                server_info = (1 << 4 - 1) | (1 << 5 - 1)
             if request.reference_ids_req is not None:
                 reference_ids_resp = self.reference_ids.to_bytes(REFERENCE_IDS_OCTETS, byteorder='big') \
                         [request.reference_ids_req[0]:sum(request.reference_ids_req)]
