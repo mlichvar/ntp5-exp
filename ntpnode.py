@@ -395,6 +395,10 @@ class NtpClient:
             logging.info("  Unsynchronized response")
             return
 
+        if response.timescale != self.timescale:
+            logging.info("  Unsupported timescale")
+            return
+
         if response.version == 5:
             if response.reference_ids_resp is not None:
                 self.merge_refids_fragment(int.from_bytes(response.reference_ids_resp, byteorder='big'))
