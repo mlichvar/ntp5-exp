@@ -177,6 +177,12 @@ class NtpMessage:
 
             extensions = extensions[(ef_len + 3) & 0xfffc:]
 
+        if version == 5:
+            if draft_id is None:
+                raise ValueError("Missing draft ID")
+            if draft_id != OUR_DRAFT_ID:
+                raise ValueError("Unknown draft ID {}".format(draft_id))
+
         return cls(leap, version, mode, stratum, poll, precision, root_delay, root_disp,
                    receive_ts, transmit_ts, timescale, era, flags,
                    server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
