@@ -2,7 +2,7 @@
 
 This is an experimental implementation of an NTPv5+NTPv4 client and server,
 following
-https://datatracker.ietf.org/doc/html/draft-mlichvar-ntp-ntpv5[this] draft.
+https://datatracker.ietf.org/doc/html/draft-ietf-ntp-ntpv5[this] draft.
 Both basic and interleaved measurement modes are supported. The protocol
 version is negotiated if not specified on the command line. 
 
