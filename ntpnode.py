@@ -381,7 +381,7 @@ class NtpClient:
             if response.client_cookie != self.last_request.client_cookie:
                 logging.info("  Bogus response")
                 return
-            interleaved = response.flags & Ntp5Flag.INTERLEAVED
+            interleaved = response.flags & Ntp5Flag.INTERLEAVED != 0
         elif response.version == 4:
             if response.origin_ts == self.last_request.receive_ts:
                 interleaved = True
