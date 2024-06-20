@@ -54,6 +54,7 @@ class Ntp5Timescale(enum.IntEnum):
 class Ntp5Flag(enum.IntEnum):
     UNKNOWN_LEAP = 0x1
     INTERLEAVED = 0x2
+    AUTH_NAK = 0x4
 
 class NtpEF(enum.IntEnum):
     PADDING = 0xf501
@@ -67,12 +68,12 @@ class NtpEF(enum.IntEnum):
     SECONDARY_RX_TS = 0xf509
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-01"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-02"
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
 class Ntp4MagicRefTs(enum.IntEnum):
-    NTP5 = struct.unpack("!Q", b"NTP5NTP5")[0]
+    NTP5 = struct.unpack("!Q", b"NTP5DRFT")[0]
 
 def read_clock(precision):
     return int((time.time() + 0x83aa7e80) * 4294967296) ^ \
