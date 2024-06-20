@@ -316,7 +316,7 @@ class NtpClient:
             assert False
 
         return NtpMessage(NtpLeap.NORMAL, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
-                          receive_ts, transmit_ts, timescale, flags, era, server_cookie,
+                          receive_ts, transmit_ts, timescale, era, flags, server_cookie,
                           client_cookie, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
                           reference_ts_=reference_ts_, secondary_rx_ts=secondary_rx_ts,
