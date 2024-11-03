@@ -35,7 +35,13 @@ import time
 
 from dataclasses import dataclass
 
-class NtpLeap(enum.IntEnum):
+class Ntp5Leap(enum.IntEnum):
+    NORMAL = 0
+    INSERT = 1
+    DELETE = 2
+    UNKNOWN = 3
+
+class Ntp4Leap(enum.IntEnum):
     NORMAL = 0
     INSERT = 1
     DELETE = 2
@@ -52,7 +58,7 @@ class Ntp5Timescale(enum.IntEnum):
     SMEARED_UTC = 3
 
 class Ntp5Flag(enum.IntEnum):
-    UNKNOWN_LEAP = 0x1
+    SYNCHRONIZED = 0x1
     INTERLEAVED = 0x2
     AUTH_NAK = 0x4
 
@@ -68,7 +74,7 @@ class NtpEF(enum.IntEnum):
     SECONDARY_RX_TS = 0xf509
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-02"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-02+"
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
@@ -82,7 +88,6 @@ def read_clock(precision):
 @dataclass
 class NtpMessage:
     # Both NTPv5 and NTPv4
-    leap: NtpLeap
     version: int
     mode: NtpMode
     stratum: int
@@ -94,6 +99,7 @@ class NtpMessage:
     transmit_ts: int
 
     # NTPv5-specific
+    leap5: Ntp5Leap
     timescale: Ntp5Timescale
     era: int
     flags: int
@@ -101,6 +107,7 @@ class NtpMessage:
     client_cookie: int
 
     # NTPv4-specific
+    leap4: Ntp4Leap
     reference_id: int
     reference_ts: int
     origin_ts: int
@@ -120,11 +127,12 @@ class NtpMessage:
 
         lvm = message[0]
 
-        leap = NtpLeap(lvm >> 6)
         version = (lvm >> 3) & 7
         mode = NtpMode(lvm & 7)
 
         if version == 5:
+            leap5 = Ntp5Leap(lvm >> 6)
+            leap4 = None
             _, stratum, poll, precision, timescale, era, flags, \
                 root_delay, root_disp, server_cookie, client_cookie, receive_ts, transmit_ts = \
                      struct.unpack("!BBbbBBHIIQQQQ", message[:48])
@@ -133,6 +141,8 @@ class NtpMessage:
             root_disp = root_disp / 2**28
             reference_id = reference_ts = origin_ts = None
         elif version == 4:
+            leap4 = Ntp4Leap(lvm >> 6)
+            leap5 = None
             _, stratum, poll, precision, root_delay, root_disp, reference_id, \
                 reference_ts, origin_ts, receive_ts, transmit_ts = \
                      struct.unpack("!BBbbIIIQQQQ", message[:48])
@@ -184,9 +194,9 @@ class NtpMessage:
             if draft_id != OUR_DRAFT_ID:
                 raise ValueError("Unknown draft ID {}".format(draft_id))
 
-        return cls(leap, version, mode, stratum, poll, precision, root_delay, root_disp,
-                   receive_ts, transmit_ts, timescale, era, flags,
-                   server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
+        return cls(version, mode, stratum, poll, precision, root_delay, root_disp,
+                   receive_ts, transmit_ts, leap5, timescale, era, flags,
+                   server_cookie, client_cookie, leap4, reference_id, reference_ts, origin_ts,
                    server_info, reference_ids_req, reference_ids_resp, reference_ts_,
                    secondary_rx_ts, draft_id)
 
@@ -203,12 +213,14 @@ class NtpMessage:
     def encode(self, target_len=0):
         stratum = self.stratum if self.stratum < 16 else 0
         if self.version == 5:
-            header = struct.pack("!BBbbBBHIIQQQQ", (self.leap << 6) | (self.version << 3) | self.mode, stratum,
+            header = struct.pack("!BBbbBBHIIQQQQ",
+                                 (self.leap5 << 6) | (self.version << 3) | self.mode, stratum,
                                  self.poll, self.precision, self.timescale, self.era, self.flags,
                                  self.get_rint(self.root_delay), self.get_rint(self.root_disp),
                                  self.server_cookie, self.client_cookie, self.receive_ts, self.transmit_ts)
         elif self.version == 4:
-            header = struct.pack("!BBbbIIIQQQQ", (self.leap << 6) | (self.version << 3) | self.mode, stratum,
+            header = struct.pack("!BBbbIIIQQQQ",
+                                 (self.leap4 << 6) | (self.version << 3) | self.mode, stratum,
                                  self.poll, self.precision, self.get_rint(self.root_delay),
                                  self.get_rint(self.root_disp), self.reference_id, self.reference_ts,
                                  self.origin_ts, self.receive_ts, self.transmit_ts)
@@ -247,7 +259,6 @@ class NtpSample:
     disp: float
     root_delay: float
     root_disp: float
-    leap: int
     stratum: int
 
 class NtpClient:
@@ -316,9 +327,10 @@ class NtpClient:
         else:
             assert False
 
-        return NtpMessage(NtpLeap.NORMAL, self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
-                          receive_ts, transmit_ts, timescale, era, flags, server_cookie,
-                          client_cookie, reference_id, reference_ts, origin_ts,
+        return NtpMessage(self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
+                          receive_ts, transmit_ts, Ntp5Leap.NORMAL, timescale, era, flags,
+                          server_cookie, client_cookie, Ntp4Leap.NORMAL, reference_id,
+                          reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
                           reference_ts_=reference_ts_, secondary_rx_ts=secondary_rx_ts,
                           draft_id=draft_id)
@@ -397,7 +409,9 @@ class NtpClient:
 
         self.reference_id = response.reference_id
 
-        if response.leap == NtpLeap.UNSYNCHRONIZED or response.stratum == 0 or \
+        if (response.version == 5 and not response.flags & Ntp5Flag.SYNCHRONIZED) or \
+                (response.version == 4 and not response.leap4 != Ntp4Leap.UNSYNCHRONIZED) or \
+                response.stratum == 0 or \
                 response.root_delay / 2 + response.root_disp > 16:
             logging.info("  Unsynchronized response")
             return
@@ -429,7 +443,7 @@ class NtpClient:
 
         self.sample = NtpSample(offset, delay, delay * self.dispersion_rate,
                                 delay + response.root_delay, delay * self.dispersion_rate +
-                                response.root_disp, response.leap, response.stratum)
+                                response.root_disp, response.stratum)
 
         logging.info("  {} mode offset={:+.6f} delay={:.6f} rdist={:.6f} stratum={}".format(
                        "Interleaved" if interleaved else "Basic", self.sample.offset, self.sample.delay,
@@ -465,13 +479,26 @@ class NtpServer:
         self.reference_ids = self.own_reference_id
 
         if local_reference:
-            self.leap = NtpLeap.NORMAL
-            self.stratum = 1
-            self.reference_id = 0x7f7f0001
+            self.set_reference(1, 0x7f7f0001, 0, 0, 0.0, 0.0)
         else:
-            self.leap = NtpLeap.UNSYNCHRONIZED
-            self.stratum = 0
-            self.reference_id = 0
+            self.set_reference(0, 0, 0, 0, 0.0, 0.0)
+
+    def set_reference(self, stratum, reference_id, reference_ids, reference_ts,
+                      root_delay, root_disp):
+        if stratum > 0:
+            self.leap4 = Ntp4Leap.NORMAL
+            self.leap5 = Ntp5Leap.NORMAL
+            self.flags = Ntp5Flag.SYNCHRONIZED
+        else:
+            self.leap4 = Ntp4Leap.UNSYNCHRONIZED
+            self.leap5 = Ntp5Leap.UNKNOWN
+            self.flags = 0
+        self.stratum = stratum
+        self.reference_id = reference_id
+        self.reference_ids = self.own_reference_id | reference_ids
+        self.reference_ts = reference_ts
+        self.root_delay = root_delay
+        self.root_disp = root_disp
 
     def make_response(self, request, receive_ts, transmit_ts):
         timescale = era = flags = server_cookie = client_cookie = None
@@ -484,7 +511,8 @@ class NtpServer:
 
         if request.version == 5:
             timescale = Ntp5Timescale.UTC
-            flags = era = 0
+            flags = self.flags
+            era = 0
 
             if request.flags & Ntp5Flag.INTERLEAVED:
                 if request.server_cookie != 0 and request.server_cookie in self.saved_timestamps:
@@ -526,9 +554,10 @@ class NtpServer:
             else:
                 reference_ts = self.reference_ts
 
-        return NtpMessage(self.leap, request.version, NtpMode.SERVER, self.stratum, request.poll, self.precision,
-                          self.root_delay, root_disp, receive_ts, transmit_ts, timescale, era, flags,
-                          server_cookie, client_cookie, reference_id, reference_ts, origin_ts,
+        return NtpMessage(request.version, NtpMode.SERVER, self.stratum, request.poll, self.precision,
+                          self.root_delay, root_disp, receive_ts, transmit_ts,
+                          self.leap5, timescale, era, flags, server_cookie, client_cookie,
+                          self.leap4, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_resp=reference_ids_resp,
                           reference_ts_=reference_ts_, secondary_rx_ts=secondary_rx_ts,
                           draft_id=draft_id)
@@ -666,19 +695,17 @@ class NtpNode:
         selected_sources.sort(key=lambda s: s[1].root_delay / 2 + s[1].root_disp + 0.001 * s[1].stratum)
         self.selected_sources = [s[0] for s in selected_sources]
 
-        self.server.reference_ids = self.server.own_reference_id
-
         if len(selected_sources) > 0:
+            selected_reference_ids = 0
             for i, (address, sample, reference_ids) in enumerate(selected_sources):
                 logging.info("  {}: Selected #{}".format(address, i + 1))
-                self.server.reference_ids |= reference_ids
-                if i == 0:
-                    self.server.leap = sample.leap
-                    self.server.stratum = sample.stratum + 1
-                    self.server.reference_id = int(ipaddress.IPv4Address(address[0]))
-                    self.server.reference_ts = read_clock(self.server.precision)
-                    self.server.root_delay = sample.root_delay
-                    self.server.root_disp = sample.root_disp
+                selected_reference_ids |= reference_ids
+            self.server.set_reference(sample.stratum + 1,
+                                      int(ipaddress.IPv4Address(selected_sources[0][0][0])),
+                                      selected_reference_ids,
+                                      read_clock(self.server.precision),
+                                      sample.root_delay,
+                                      sample.root_disp)
 
     def get_descriptors(self):
         return list(self.clients.keys()) + self.server_sockets
