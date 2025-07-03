@@ -74,7 +74,7 @@ class NtpEF(enum.IntEnum):
     SECONDARY_RX_TS = 0xf509
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-02+"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-04"
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
