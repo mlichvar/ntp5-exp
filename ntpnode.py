@@ -734,7 +734,7 @@ class NtpNode:
             for sock, client in self.clients.items():
                 client.send_request(sock)
 
-            self.next_poll = time.monotonic() + 2**self.poll
+            self.next_poll = time.monotonic() + 2**self.poll * random.uniform(1.00, 1.02)
 
 
 if __name__ == "__main__":
