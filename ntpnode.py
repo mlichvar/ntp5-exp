@@ -302,7 +302,7 @@ class NtpClient:
         receive_ts = transmit_ts = 0
 
         if self.version == 5:
-            poll = self.poll
+            poll = 0
             timescale = self.timescale
             flags = 0
             era = 0
