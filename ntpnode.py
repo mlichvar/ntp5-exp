@@ -262,8 +262,9 @@ class NtpSample:
     stratum: int
 
 class NtpClient:
-    def __init__(self, dispersion_rate, version, interleaved, refids_fragments):
+    def __init__(self, dispersion_rate, version, poll, interleaved, refids_fragments):
         self.dispersion_rate = dispersion_rate
+        self.poll = poll
         self.precision = -20
         if version in (4, 5):
             self.version = version
@@ -301,6 +302,7 @@ class NtpClient:
         receive_ts = transmit_ts = 0
 
         if self.version == 5:
+            poll = self.poll
             timescale = self.timescale
             flags = 0
             era = 0
@@ -318,6 +320,7 @@ class NtpClient:
             secondary_rx_ts = {timescale: (0, 0)}
             draft_id = OUR_DRAFT_ID
         elif self.version == 4:
+            poll = self.poll
             reference_id = origin_ts = 0
             reference_ts = Ntp4MagicRefTs.NTP5 if self.auto_version else 0
             transmit_ts = random.getrandbits(64)
@@ -327,7 +330,7 @@ class NtpClient:
         else:
             assert False
 
-        return NtpMessage(self.version, NtpMode.CLIENT, 0, 0, 0, 0, 0,
+        return NtpMessage(self.version, NtpMode.CLIENT, 0, poll, 0, 0, 0,
                           receive_ts, transmit_ts, Ntp5Leap.NORMAL, timescale, era, flags,
                           server_cookie, client_cookie, Ntp4Leap.NORMAL, reference_id,
                           reference_ts, origin_ts,
@@ -510,6 +513,7 @@ class NtpServer:
             root_disp += abs(transmit_ts - self.reference_ts) / 2**32 * self.dispersion_rate
 
         if request.version == 5:
+            poll = -10
             timescale = Ntp5Timescale.UTC
             flags = self.flags
             era = 0
@@ -538,6 +542,7 @@ class NtpServer:
                 draft_id = OUR_DRAFT_ID[:len(request.draft_id)]
 
         elif request.version == 4:
+            poll = request.poll
             if request.receive_ts != request.transmit_ts and \
                     request.origin_ts in self.saved_timestamps:
                 # Provide each saved timestamp at most once to avoid broken
@@ -554,7 +559,7 @@ class NtpServer:
             else:
                 reference_ts = self.reference_ts
 
-        return NtpMessage(request.version, NtpMode.SERVER, self.stratum, request.poll, self.precision,
+        return NtpMessage(request.version, NtpMode.SERVER, self.stratum, poll, self.precision,
                           self.root_delay, root_disp, receive_ts, transmit_ts,
                           self.leap5, timescale, era, flags, server_cookie, client_cookie,
                           self.leap4, reference_id, reference_ts, origin_ts,
@@ -651,7 +656,7 @@ class NtpNode:
             for family, _, _, _, sockaddr in socket.getaddrinfo(hostname, port, family=socket.AF_INET):
                 sock = socket.socket(family, socket.SOCK_DGRAM)
                 sock.connect(sockaddr)
-                self.clients[sock] = NtpClient(dispersion_rate, version, interleaved, refids_fragments)
+                self.clients[sock] = NtpClient(dispersion_rate, version, poll, interleaved, refids_fragments)
                 self.own_addresses.add(sock.getsockname()[0])
                 self.selection_delays[sockaddr] = 0
                 break
