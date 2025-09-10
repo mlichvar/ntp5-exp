@@ -74,7 +74,7 @@ class NtpEF(enum.IntEnum):
     SECONDARY_RX_TS = 0xf509
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-05"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-06"
 
 REFERENCE_IDS_OCTETS = 4096 // 8
 
@@ -133,9 +133,9 @@ class NtpMessage:
         if version == 5:
             leap5 = Ntp5Leap(lvm >> 6)
             leap4 = None
-            _, stratum, poll, precision, timescale, era, flags, \
-                root_delay, root_disp, server_cookie, client_cookie, receive_ts, transmit_ts = \
-                     struct.unpack("!BBbbBBHIIQQQQ", message[:48])
+            _, stratum, poll, precision, root_delay, root_disp, timescale, era, flags, \
+                server_cookie, client_cookie, receive_ts, transmit_ts = \
+                     struct.unpack("!BBbbIIBBHQQQQ", message[:48])
             timescale = Ntp5Timescale(timescale)
             root_delay = root_delay / 2**28
             root_disp = root_disp / 2**28
@@ -213,10 +213,10 @@ class NtpMessage:
     def encode(self, target_len=0):
         stratum = self.stratum if self.stratum < 16 else 0
         if self.version == 5:
-            header = struct.pack("!BBbbBBHIIQQQQ",
+            header = struct.pack("!BBbbIIBBHQQQQ",
                                  (self.leap5 << 6) | (self.version << 3) | self.mode, stratum,
-                                 self.poll, self.precision, self.timescale, self.era, self.flags,
-                                 self.get_rint(self.root_delay), self.get_rint(self.root_disp),
+                                 self.poll, self.precision, self.get_rint(self.root_delay),
+                                 self.get_rint(self.root_disp), self.timescale, self.era, self.flags,
                                  self.server_cookie, self.client_cookie, self.receive_ts, self.transmit_ts)
         elif self.version == 4:
             header = struct.pack("!BBbbIIIQQQQ",
