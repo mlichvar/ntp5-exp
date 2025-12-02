@@ -122,6 +122,7 @@ if __name__ == "__main__":
                 print("  {} <- {}".format(i, ids))
 
             looped = []
+            outside = []
             for i in range(len(nodes)):
                 visited = sels[i]
                 while True:
@@ -132,9 +133,13 @@ if __name__ == "__main__":
                         looped.append(i)
                         break
                     if prev_len == len(visited):
+                        if i >= args.primary_nodes and \
+                                (len(visited) == 0 or min(visited) >= args.primary_nodes):
+                            outside.append(i)
                         break
 
             print("Looped nodes: {}".format(looped))
+            print("Outside nodes: {}".format(outside))
 
             if sels == last_sels:
                 unchanged_sels += 1
