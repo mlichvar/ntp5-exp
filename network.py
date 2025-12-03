@@ -99,6 +99,7 @@ if __name__ == "__main__":
     last_sels = []
     unchanged_sels = 0
     start_time = time.monotonic()
+    last_print_time = 0.0
 
     while True:
         descriptors = []
@@ -112,8 +113,10 @@ if __name__ == "__main__":
         for node in nodes:
             node.process_events(wait=False)
 
-        if not rlist:
-            print("Selection at {:.1f}:".format(time.monotonic() - start_time))
+        if not rlist and last_print_time + 2**args.poll < time.monotonic():
+            last_print_time = time.monotonic()
+
+            print("Selection at {:.1f}:".format(last_print_time - start_time))
 
             sels = []
             for i, node in enumerate(nodes):
