@@ -74,9 +74,9 @@ class NtpEF(enum.IntEnum):
     SECONDARY_RX_TS = 0xf509
     DRAFT_ID = 0xf5ff
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-07"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-07+"
 
-REFERENCE_IDS_OCTETS = 4096 // 8
+MAX_REFERENCE_IDS = 32
 
 class Ntp4MagicRefTs(enum.IntEnum):
     NTP5 = struct.unpack("!Q", b"NTP5DRFT")[0]
@@ -115,10 +115,25 @@ class NtpMessage:
     # Extension fields
     server_info: int = None # bit field
     reference_ids_req: tuple = None # (offset, length)
-    reference_ids_resp: bytes = None
+    reference_ids_resp: tuple = None # list of (weight, reference ID)
     reference_ts_: int = None
     secondary_rx_ts: dict = None # timescale -> (era, timestamp)
     draft_id: str = None
+
+    @classmethod
+    def decode_reference_ids(cls, data):
+        reference_ids = []
+        for i in range(0, len(data) // 8):
+            u64 = struct.unpack("!Q", data[8 * i:8 * (i + 1)])[0]
+            reference_ids.append((u64 >> 56, u64 & ((1 << 56) - 1)))
+        return reference_ids
+
+    @classmethod
+    def encode_reference_ids(cls, reference_ids):
+        data = b''
+        for weight, ref_id in reference_ids:
+            data += struct.pack("!Q", (weight << 56) | ref_id)
+        return data
 
     @classmethod
     def decode(cls, message):
@@ -167,9 +182,9 @@ class NtpMessage:
                 raise ValueError("Invalid format")
 
             if ef_type == NtpEF.REFERENCE_IDS_REQ:
-                reference_ids_req = (struct.unpack("!H", extensions[4:6])[0], ef_len - 4)
+                reference_ids_req = (struct.unpack("!H", extensions[4:6])[0], (ef_len - 4) // 8)
             elif ef_type == NtpEF.REFERENCE_IDS_RESP:
-                reference_ids_resp = extensions[4:ef_len]
+                reference_ids_resp = NtpMessage.decode_reference_ids(extensions[4:ef_len])
             elif ef_type == NtpEF.SERVER_INFO and ef_len == 8:
                 server_info = struct.unpack("!H", extensions[4:6])[0]
             elif ef_type == NtpEF.REFERENCE_TS and ef_len == 12:
@@ -234,9 +249,11 @@ class NtpMessage:
                                       struct.pack("!HH", self.server_info, 0))
         if self.reference_ids_req is not None:
             message += self.encode_ef(NtpEF.REFERENCE_IDS_REQ,
-                    struct.pack("!H", self.reference_ids_req[0]) + (self.reference_ids_req[1] - 2) * " ".encode())
+                    struct.pack("!H", self.reference_ids_req[0]) + \
+                                      (8 * self.reference_ids_req[1] - 2) * " ".encode())
         if self.reference_ids_resp is not None:
-            message += self.encode_ef(NtpEF.REFERENCE_IDS_RESP, self.reference_ids_resp)
+            message += self.encode_ef(NtpEF.REFERENCE_IDS_RESP,
+                                      NtpMessage.encode_reference_ids(self.reference_ids_resp))
         if self.reference_ts_ is not None:
             message += self.encode_ef(NtpEF.REFERENCE_TS, struct.pack("!Q", self.reference_ts_))
         if self.secondary_rx_ts is not None:
@@ -278,7 +295,7 @@ class NtpClient:
 
         self.missed_responses = 0
 
-        self.reference_ids = 0
+        self.reference_ids = MAX_REFERENCE_IDS * [(0, 0)]
         self.next_refids_fragment = 0
         self.complete_refids = False
 
@@ -314,8 +331,8 @@ class NtpClient:
                 server_cookie = 0
             client_cookie = random.getrandbits(64)
             server_info = 0
-            reference_ids_req = (self.next_refids_fragment * (REFERENCE_IDS_OCTETS // self.refids_fragments),
-                                 (REFERENCE_IDS_OCTETS // self.refids_fragments))
+            reference_ids_req = (self.next_refids_fragment * MAX_REFERENCE_IDS // self.refids_fragments,
+                                 MAX_REFERENCE_IDS // self.refids_fragments)
             reference_ts_ = 0
             secondary_rx_ts = {timescale: (0, 0)}
             draft_id = OUR_DRAFT_ID
@@ -357,18 +374,27 @@ class NtpClient:
                                                              sock.getpeername()))
         logging.debug("  {}".format(self.last_request))
 
-    def merge_refids_fragment(self, fragment):
-        start = self.next_refids_fragment * (REFERENCE_IDS_OCTETS // self.refids_fragments)
-        end = min(REFERENCE_IDS_OCTETS, start + (REFERENCE_IDS_OCTETS // self.refids_fragments))
-        mask = (((1 << (8 * start)) - 1) << (8 * (REFERENCE_IDS_OCTETS - start))) | \
-                ((1 << (8 * (REFERENCE_IDS_OCTETS - end))) - 1)
-        self.reference_ids = (self.reference_ids & mask) | \
-                             (fragment << ((REFERENCE_IDS_OCTETS - end) * 8))
-        if end < REFERENCE_IDS_OCTETS:
-            self.next_refids_fragment += 1
-        else:
+    def merge_refids_fragment(self, reference_ids):
+        frag_len = MAX_REFERENCE_IDS // self.refids_fragments
+
+        if len(reference_ids) != frag_len:
+            logging.error("Unexpected length of received reference IDs")
+            return
+
+        self.reference_ids = self.reference_ids[:frag_len * self.next_refids_fragment] + \
+                reference_ids + self.reference_ids[frag_len * (self.next_refids_fragment + 1):]
+
+        self.next_refids_fragment += 1
+        if self.next_refids_fragment >= self.refids_fragments:
             self.next_refids_fragment = 0
             self.complete_refids = True
+
+        #if reference_ids[-1] == (0, 0):
+        #    self.reference_ids =
+        #    self.next_refids_fragment = 0
+        #    self.complete_refids = True
+
+        logging.debug("  refids: {}".format(self.reference_ids))
 
     def receive_response(self, sock):
         try:
@@ -406,7 +432,7 @@ class NtpClient:
             else:
                 logging.info("  Bogus response")
                 return
-            self.reference_ids = 0
+            self.reference_ids = MAX_REFERENCE_IDS * [(0, 0)]
         else:
             return
 
@@ -426,7 +452,7 @@ class NtpClient:
 
         if response.version == 5:
             if response.reference_ids_resp is not None:
-                self.merge_refids_fragment(int.from_bytes(response.reference_ids_resp, byteorder='big'))
+                self.merge_refids_fragment(response.reference_ids_resp)
 
         if interleaved:
             T1 = self.prev_transmit_ts
@@ -474,17 +500,36 @@ class NtpServer:
         self.root_disp = 0.0
         self.reference_ts = read_clock(self.precision)
 
-        self.own_reference_id = 0
-        for i in range(10):
-            self.own_reference_id |= 1 << random.randint(0, REFERENCE_IDS_OCTETS * 8 - 1)
-        self.reference_ids = self.own_reference_id
+        self.own_reference_id = random.randint(0, (1 << 56) - 1)
 
         if local_reference:
-            self.set_reference(1, 0x7f7f0001, 0, 0, 0.0, 0.0)
+            self.set_reference(1, 0x7f7f0001, [], 0, 0.0, 0.0)
         else:
-            self.set_reference(0, 0, 0, 0, 0.0, 0.0)
+            self.set_reference(0, 0, [], 0, 0.0, 0.0)
 
-    def set_reference(self, stratum, reference_id, reference_ids, reference_ts,
+    def merge_reference_ids(self, reference_idss):
+        weight_refids = dict()
+
+        for reference_ids in reference_idss:
+            for weight, ref_id in reference_ids:
+                if weight == 0:
+                    continue
+                if ref_id not in weight_refids:
+                    weight_refids[ref_id] = 0
+                weight_refids[ref_id] += weight
+
+        merged = [(w // len(reference_idss), r) for r, w in weight_refids.items()]
+        merged.sort(key=lambda wr: wr[0], reverse=True)
+        merged = [(255, self.own_reference_id)] + merged[:MAX_REFERENCE_IDS - 1]
+
+        if len(merged) < MAX_REFERENCE_IDS:
+            merged += [(0, 0)] * (MAX_REFERENCE_IDS - len(merged))
+
+        logging.debug("  merged refids: {}".format(merged))
+
+        return merged
+
+    def set_reference(self, stratum, reference_id, reference_idss, reference_ts,
                       root_delay, root_disp):
         if stratum > 0:
             self.leap4 = Ntp4Leap.NORMAL
@@ -496,7 +541,7 @@ class NtpServer:
             self.flags = 0
         self.stratum = stratum
         self.reference_id = reference_id
-        self.reference_ids = self.own_reference_id | reference_ids
+        self.reference_ids = self.merge_reference_ids(reference_idss)
         self.reference_ts = reference_ts
         self.root_delay = root_delay
         self.root_disp = root_disp
@@ -528,8 +573,8 @@ class NtpServer:
             if request.server_info is not None:
                 server_info = (1 << 4 - 1) | (1 << 5 - 1)
             if request.reference_ids_req is not None:
-                reference_ids_resp = self.reference_ids.to_bytes(REFERENCE_IDS_OCTETS, byteorder='big') \
-                        [request.reference_ids_req[0]:sum(request.reference_ids_req)]
+                reference_ids_resp = self.reference_ids[request.reference_ids_req[0]:
+                                                        request.reference_ids_req[0] + request.reference_ids_req[1]]
             if request.reference_ts_ is not None:
                 reference_ts_ = self.reference_ts
             if request.secondary_rx_ts is not None:
@@ -667,6 +712,12 @@ class NtpNode:
         self.server_sockets = [sock]
         self.server = NtpServer(dispersion_rate, local_reference)
 
+    def check_loop(self, reference_ids):
+        for weight, ref_id in reference_ids:
+            if ref_id == self.server.own_reference_id:
+                return True
+        return False
+
     def select_sources(self):
         logging.info("Selecting sources:")
 
@@ -683,7 +734,7 @@ class NtpNode:
                 logging.info("  {}: Not selected (distance too large)".format(address))
             elif client.version == 5 and not client.complete_refids:
                 logging.info("  {}: Not selected (waiting for complete refids)".format(address))
-            elif self.server.own_reference_id & client.reference_ids == self.server.own_reference_id or \
+            elif self.check_loop(client.reference_ids) or \
                  (not self.no_refid_loop and client.reference_id is not None and \
                   str(ipaddress.IPv4Address(client.reference_id)) in self.own_addresses):
                 logging.info("  {}: Not selected (synchronization loop)".format(address))
@@ -700,10 +751,11 @@ class NtpNode:
 
         if len(selected_sources) > 0:
             best_sample = selected_sources[0][1]
-            selected_reference_ids = 0
+            selected_reference_ids = []
             for i, (address, sample, reference_ids) in enumerate(selected_sources):
                 logging.info("  {}: Selected #{}".format(address, i + 1))
-                selected_reference_ids |= reference_ids
+                selected_reference_ids.append(reference_ids)
+
             self.server.set_reference(best_sample.stratum + 1,
                                       int(ipaddress.IPv4Address(selected_sources[0][0][0])),
                                       selected_reference_ids,
