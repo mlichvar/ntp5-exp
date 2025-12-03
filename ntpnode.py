@@ -698,16 +698,17 @@ class NtpNode:
         self.selected_sources = [s[0] for s in selected_sources]
 
         if len(selected_sources) > 0:
+            best_sample = selected_sources[0][1]
             selected_reference_ids = 0
             for i, (address, sample, reference_ids) in enumerate(selected_sources):
                 logging.info("  {}: Selected #{}".format(address, i + 1))
                 selected_reference_ids |= reference_ids
-            self.server.set_reference(sample.stratum + 1,
+            self.server.set_reference(best_sample.stratum + 1,
                                       int(ipaddress.IPv4Address(selected_sources[0][0][0])),
                                       selected_reference_ids,
                                       read_clock(self.server.precision),
-                                      sample.root_delay,
-                                      sample.root_disp)
+                                      best_sample.root_delay,
+                                      best_sample.root_disp)
 
     def get_descriptors(self):
         return list(self.clients.keys()) + self.server_sockets
