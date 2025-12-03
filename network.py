@@ -119,7 +119,9 @@ if __name__ == "__main__":
             for i, node in enumerate(nodes):
                 ids = [s[1] - args.first_port for s in node.selected_sources]
                 sels.append(set(ids))
-                print("  {} <- {}".format(i, ids))
+                print("  {:2d} {:.3f}  {} <- {}".format(node.server.stratum,
+                                                        node.server.root_delay / 2 + node.server.root_disp,
+                                                        i, ids))
 
             looped = []
             outside = []
