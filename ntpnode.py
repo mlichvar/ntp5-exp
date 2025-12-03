@@ -411,6 +411,7 @@ class NtpClient:
             return
 
         self.reference_id = response.reference_id
+        self.sample = None
 
         if (response.version == 5 and not response.flags & Ntp5Flag.SYNCHRONIZED) or \
                 (response.version == 4 and not response.leap4 != Ntp4Leap.UNSYNCHRONIZED) or \
