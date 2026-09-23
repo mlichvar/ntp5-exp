@@ -59,7 +59,7 @@ class Ntp5Timescale(enum.IntEnum):
     SMEARED_UTC = 3
 
 class Ntp5Flag(enum.IntEnum):
-    SYNCHRONIZED = 0x1
+    UNSYNCHRONIZED = 0x1
     INTERLEAVED = 0x2
     AUTH_NAK = 0x4
 
@@ -325,7 +325,7 @@ class NtpClient:
         if self.version == 5:
             poll = 0
             timescale = self.timescale
-            flags = 0
+            flags = Ntp5Flag.UNSYNCHRONIZED
             era = 0
             if self.interleaved:
                 flags |= Ntp5Flag.INTERLEAVED
@@ -443,8 +443,8 @@ class NtpClient:
         self.reference_id = response.reference_id
         self.sample = None
 
-        if (response.version == 5 and not response.flags & Ntp5Flag.SYNCHRONIZED) or \
-                (response.version == 4 and not response.leap4 != Ntp4Leap.UNSYNCHRONIZED) or \
+        if (response.version == 5 and response.flags & Ntp5Flag.UNSYNCHRONIZED) or \
+                (response.version == 4 and response.leap4 == Ntp4Leap.UNSYNCHRONIZED) or \
                 response.stratum == 0 or \
                 response.root_delay / 2 + response.root_disp > 16:
             logging.info("  Unsynchronized response")
@@ -539,11 +539,11 @@ class NtpServer:
         if stratum > 0:
             self.leap4 = Ntp4Leap.NORMAL
             self.leap5 = Ntp5Leap.NORMAL
-            self.flags = Ntp5Flag.SYNCHRONIZED
+            self.flags = 0
         else:
             self.leap4 = Ntp4Leap.UNSYNCHRONIZED
             self.leap5 = Ntp5Leap.UNKNOWN
-            self.flags = 0
+            self.flags = Ntp5Flag.UNSYNCHRONIZED
         self.stratum = stratum
         self.reference_id = reference_id
         self.reference_ids = self.merge_reference_ids(reference_idss)
@@ -664,6 +664,9 @@ class NtpServer:
 
         message = response.encode(target_len=request_len)
 
+        if response.version == 5 and response.flags & ~request.flags != 0:
+            logging.error("Not sending response with flags not present in request")
+            return
         if len(message) > request_len:
             logging.error("Not sending response longer than request!")
             return
