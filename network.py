@@ -44,6 +44,8 @@ if __name__ == "__main__":
                         default=0, help="stop after POLLS identical selections")
     parser.add_argument("-f", "--refids-fragments", dest="refids_fragments", metavar="NUMBER", type=int,
                         default=4, help="specify number of Bloom filter fragments (default 4)")
+    parser.add_argument("-q", "--seq-refids", dest="seq_refids", action="store_const", const=True,
+                        default=False, help="use sequential NTPv5 reference IDs")
     parser.add_argument("-r", "--dispersion-rate", dest="dispersion_rate", metavar="RATE", type=float,
                         default=5e-3, help="specify dispersion rate (default 5e-3)")
     parser.add_argument("-m", "--max-distance", dest="max_distance", metavar="DIST", type=float,
@@ -95,6 +97,11 @@ if __name__ == "__main__":
         nodes.append(ntpnode.NtpNode(False, args.first_port + args.primary_nodes + i, args.max_distance,
                                      args.dispersion_rate,
                                      True, servers, args.version, args.poll, False, args.refids_fragments))
+
+    if args.seq_refids:
+        for i, node in enumerate(nodes):
+            node.server.own_reference_id = i + 1
+            node.server.reference_ids = node.server.merge_reference_ids([])
 
     last_sels = []
     unchanged_sels = 0
