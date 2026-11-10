@@ -36,12 +36,6 @@ import time
 
 from dataclasses import dataclass
 
-class Ntp5Leap(enum.IntEnum):
-    NORMAL = 0
-    INSERT = 1
-    DELETE = 2
-    UNKNOWN = 3
-
 class Ntp4Leap(enum.IntEnum):
     NORMAL = 0
     INSERT = 1
@@ -56,7 +50,6 @@ class Ntp5Timescale(enum.IntEnum):
     UTC = 0
     TAI = 1
     UT1 = 2
-    SMEARED_UTC = 3
 
 class Ntp5Flag(enum.IntEnum):
     UNSYNCHRONIZED = 0x1
@@ -111,7 +104,6 @@ class NtpMessage:
     transmit_ts: int
 
     # NTPv5-specific
-    leap5: Ntp5Leap
     timescale: Ntp5Timescale
     era: int
     flags: int
@@ -187,7 +179,6 @@ class NtpMessage:
         mode = NtpMode(lvm & 7)
 
         if version == 5:
-            leap5 = Ntp5Leap(lvm >> 6)
             leap4 = None
             _, stratum, poll, precision, root_delay, root_disp, timescale, era, flags, \
                 server_cookie, client_cookie, receive_ts, transmit_ts = \
@@ -198,7 +189,6 @@ class NtpMessage:
             reference_id = reference_ts = origin_ts = None
         elif version == 4:
             leap4 = Ntp4Leap(lvm >> 6)
-            leap5 = None
             _, stratum, poll, precision, root_delay, root_disp, reference_id, \
                 reference_ts, origin_ts, receive_ts, transmit_ts = \
                      struct.unpack("!BBbbIIIQQQQ", message[:48])
@@ -256,7 +246,7 @@ class NtpMessage:
                 raise ValueError("Unknown draft ID {}".format(draft_id))
 
         return cls(version, mode, stratum, poll, precision, root_delay, root_disp,
-                   receive_ts, transmit_ts, leap5, timescale, era, flags,
+                   receive_ts, transmit_ts, timescale, era, flags,
                    server_cookie, client_cookie, leap4, reference_id, reference_ts, origin_ts,
                    server_info, reference_ids_req, reference_ids_resp,
                    time_sources_req, time_sources_resp, reference_ts_,
@@ -276,7 +266,7 @@ class NtpMessage:
         stratum = self.stratum if self.stratum < 16 else 0
         if self.version == 5:
             header = struct.pack("!BBbbIIBBHQQQQ",
-                                 (self.leap5 << 6) | (self.version << 3) | self.mode, stratum,
+                                 (self.version << 3) | self.mode, stratum,
                                  self.poll, self.precision, self.get_rint(self.root_delay),
                                  self.get_rint(self.root_disp), self.timescale, self.era, self.flags,
                                  self.server_cookie, self.client_cookie, self.receive_ts, self.transmit_ts)
@@ -406,7 +396,7 @@ class NtpClient:
             assert False
 
         return NtpMessage(self.version, NtpMode.CLIENT, 0, poll, 0, 0, 0,
-                          receive_ts, transmit_ts, Ntp5Leap.NORMAL, timescale, era, flags,
+                          receive_ts, transmit_ts, timescale, era, flags,
                           server_cookie, client_cookie, Ntp4Leap.NORMAL, reference_id,
                           reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
@@ -599,11 +589,9 @@ class NtpServer:
                       root_delay, root_disp):
         if stratum > 0:
             self.leap4 = Ntp4Leap.NORMAL
-            self.leap5 = Ntp5Leap.NORMAL
             self.flags = 0
         else:
             self.leap4 = Ntp4Leap.UNSYNCHRONIZED
-            self.leap5 = Ntp5Leap.UNKNOWN
             self.flags = Ntp5Flag.UNSYNCHRONIZED
         self.stratum = stratum
         self.reference_id = reference_id
@@ -677,7 +665,7 @@ class NtpServer:
 
         return NtpMessage(request.version, NtpMode.SERVER, self.stratum, poll, self.precision,
                           self.root_delay, root_disp, receive_ts, transmit_ts,
-                          self.leap5, timescale, era, flags, server_cookie, client_cookie,
+                          timescale, era, flags, server_cookie, client_cookie,
                           self.leap4, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_resp=reference_ids_resp,
                           time_sources_resp=time_sources_resp,
