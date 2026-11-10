@@ -73,7 +73,15 @@ class NtpEF(enum.IntEnum):
     REFERENCE_TS = 0xf507
     MONOTONIC_RX_TS = 0xf508
     SECONDARY_RX_TS = 0xf509
+    TIME_SOURCES_REQ = 0xf50a
+    TIME_SOURCES_RESP = 0xf50b
     DRAFT_ID = 0xf5ff
+
+class Ntp5TimeSourceType(enum.IntEnum):
+    NONE = 0x0
+    IPV4_ADDRESS = 0x1
+    IPV6_ADDRESS = 0x2
+    NTP_REFID_CODE = 0x3
 
 OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-09+"
 
@@ -120,6 +128,8 @@ class NtpMessage:
     server_info: int = None # bit field
     reference_ids_req: tuple = None # (index, length)
     reference_ids_resp: tuple = None # list of (-log2(share)*16, reference ID)
+    time_sources_req: tuple = None # (index, length)
+    time_sources_resp: tuple = None # list of (-log2(share)*16, flags, address/refid)
     reference_ts_: int = None
     secondary_rx_ts: dict = None # timescale -> (era, timestamp)
     draft_id: str = None
@@ -137,6 +147,33 @@ class NtpMessage:
         data = b''
         for weight, ref_id in reference_ids:
             data += struct.pack("!Q", (weight << REFERENCE_ID_BITS) | ref_id)
+        return data
+
+    @classmethod
+    def decode_time_sources(cls, data):
+        time_sources = []
+        while len(data) >= 4:
+            (weight, flags, ts_type, ts_len) = struct.unpack("!BBBB", data[:4])
+            data = data[4:]
+            if ts_len > len(data):
+                raise ValueError("Invalid time source length")
+            if ts_type == Ntp5TimeSourceType.IPV4_ADDRESS and ts_len == 4:
+                time_sources.append((weight, flags,
+                                     ipaddress.IPv4Address(struct.unpack("!I", data[:4])[0])))
+            else:
+                time_sources.append(None)
+            data = data[ts_len:]
+        return time_sources
+
+    @classmethod
+    def encode_time_sources(cls, time_sources):
+        data = b''
+        for weight, flags, address in time_sources:
+            data += struct.pack("!BB", weight, flags)
+            if isinstance(address, ipaddress.IPv4Address):
+                data += struct.pack("!BBI", Ntp5TimeSourceType.IPV4_ADDRESS, 4, int(address))
+            else:
+                assert False
         return data
 
     @classmethod
@@ -174,6 +211,7 @@ class NtpMessage:
 
         extensions = message[48:]
         server_info = reference_ids_req = reference_ids_resp = reference_ts_ = None
+        time_sources_req = time_sources_resp = None
         secondary_rx_ts = draft_id = None
 
         while len(extensions) > 0:
@@ -189,6 +227,10 @@ class NtpMessage:
                 reference_ids_req = (struct.unpack("!B", extensions[4:5])[0], (ef_len - 4) // 8)
             elif ef_type == NtpEF.REFERENCE_IDS_RESP:
                 reference_ids_resp = NtpMessage.decode_reference_ids(extensions[4:ef_len])
+            elif ef_type == NtpEF.TIME_SOURCES_REQ and ef_len >= 24 and ef_len % 4 == 0:
+                time_sources_req = (struct.unpack("!B", extensions[4:5])[0], ef_len - 4)
+            elif ef_type == NtpEF.TIME_SOURCES_RESP:
+                time_sources_resp = NtpMessage.decode_time_sources(extensions[4:ef_len])
             elif ef_type == NtpEF.SERVER_INFO and ef_len == 8:
                 server_info = struct.unpack("!H", extensions[4:6])[0]
             elif ef_type == NtpEF.REFERENCE_TS and ef_len == 12:
@@ -216,7 +258,8 @@ class NtpMessage:
         return cls(version, mode, stratum, poll, precision, root_delay, root_disp,
                    receive_ts, transmit_ts, leap5, timescale, era, flags,
                    server_cookie, client_cookie, leap4, reference_id, reference_ts, origin_ts,
-                   server_info, reference_ids_req, reference_ids_resp, reference_ts_,
+                   server_info, reference_ids_req, reference_ids_resp,
+                   time_sources_req, time_sources_resp, reference_ts_,
                    secondary_rx_ts, draft_id)
 
     def get_rint(self, value):
@@ -258,6 +301,13 @@ class NtpMessage:
         if self.reference_ids_resp is not None:
             message += self.encode_ef(NtpEF.REFERENCE_IDS_RESP,
                                       NtpMessage.encode_reference_ids(self.reference_ids_resp))
+        if self.time_sources_req is not None:
+            message += self.encode_ef(NtpEF.TIME_SOURCES_REQ,
+                    struct.pack("!B", self.time_sources_req[0]) + \
+                                      (self.time_sources_req[1] - 1) * b'\x00')
+        if self.time_sources_resp is not None:
+            message += self.encode_ef(NtpEF.TIME_SOURCES_RESP,
+                                      NtpMessage.encode_time_sources(self.time_sources_resp))
         if self.reference_ts_ is not None:
             message += self.encode_ef(NtpEF.REFERENCE_TS, struct.pack("!Q", self.reference_ts_))
         if self.secondary_rx_ts is not None:
@@ -303,6 +353,8 @@ class NtpClient:
         self.next_refids_fragment = 0
         self.complete_refids = False
 
+        self.next_time_source_index = 0
+
         self.last_request = None
         self.prev_request = None
         self.prev_response = None
@@ -318,7 +370,8 @@ class NtpClient:
 
         timescale = era = flags = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
-        server_info = reference_ids_req = reference_ts_ = secondary_rx_ts = draft_id = None
+        server_info = reference_ids_req = time_sources_req = None
+        reference_ts_ = secondary_rx_ts = draft_id = None
 
         receive_ts = transmit_ts = 0
 
@@ -337,6 +390,7 @@ class NtpClient:
             server_info = 0
             reference_ids_req = (self.next_refids_fragment * NUM_REFERENCE_IDS // self.refids_fragments,
                                  NUM_REFERENCE_IDS // self.refids_fragments)
+            time_sources_req = (self.next_time_source_index, 20)
             reference_ts_ = 0
             secondary_rx_ts = {timescale: (0, 0)}
             draft_id = OUR_DRAFT_ID
@@ -356,6 +410,7 @@ class NtpClient:
                           server_cookie, client_cookie, Ntp4Leap.NORMAL, reference_id,
                           reference_ts, origin_ts,
                           server_info=server_info, reference_ids_req=reference_ids_req,
+                          time_sources_req=time_sources_req,
                           reference_ts_=reference_ts_, secondary_rx_ts=secondary_rx_ts,
                           draft_id=draft_id)
 
@@ -457,6 +512,10 @@ class NtpClient:
         if response.version == 5:
             if response.reference_ids_resp is not None:
                 self.merge_refids_fragment(response.reference_ids_resp)
+            if response.time_sources_resp is not None and len(response.time_sources_resp) > 0:
+                self.next_time_source_index += len(response.time_sources_resp)
+            else:
+                self.next_time_source_index = 0
 
         if interleaved:
             T1 = self.prev_transmit_ts
@@ -507,9 +566,12 @@ class NtpServer:
         self.own_reference_id = random.randint(1, (1 << REFERENCE_ID_BITS) - 1)
 
         if local_reference:
-            self.set_reference(1, 0x7f7f0001, [], 0, 0.0, 0.0)
+            self.set_reference(1, 0x7f7f0001, [], [], 0, 0.0, 0.0)
         else:
-            self.set_reference(0, 0, [], 0, 0.0, 0.0)
+            self.set_reference(0, 0, [], [], 0, 0.0, 0.0)
+
+    def get_encoded_share(self, share):
+        return max(0, min(MAX_REFERENCE_ID_SHARE, int(-REFERENCE_ID_SHARE_SCALE * math.log2(share))))
 
     def merge_reference_ids(self, reference_idss):
         weight_refids = dict()
@@ -522,8 +584,7 @@ class NtpServer:
                     weight_refids[ref_id] = 0
                 weight_refids[ref_id] += 2**(-weight / REFERENCE_ID_SHARE_SCALE)
 
-        merged = [(max(0, min(MAX_REFERENCE_ID_SHARE, int(-REFERENCE_ID_SHARE_SCALE * math.log2(w / 2)))), r) \
-                  for r, w in weight_refids.items()]
+        merged = [(self.get_encoded_share(w / 2), r) for r, w in weight_refids.items()]
         merged.sort(key=lambda wr: wr[0], reverse=False)
         merged = [(0, self.own_reference_id)] + merged[:NUM_REFERENCE_IDS - 1]
 
@@ -534,7 +595,7 @@ class NtpServer:
 
         return merged
 
-    def set_reference(self, stratum, reference_id, reference_idss, reference_ts,
+    def set_reference(self, stratum, reference_id, reference_idss, time_sources, reference_ts,
                       root_delay, root_disp):
         if stratum > 0:
             self.leap4 = Ntp4Leap.NORMAL
@@ -547,6 +608,8 @@ class NtpServer:
         self.stratum = stratum
         self.reference_id = reference_id
         self.reference_ids = self.merge_reference_ids(reference_idss)
+        self.time_sources = [(self.get_encoded_share(1 / len(time_sources) / 2), *ts) \
+                             for ts in time_sources]
         self.reference_ts = reference_ts
         self.root_delay = root_delay
         self.root_disp = root_disp
@@ -555,6 +618,7 @@ class NtpServer:
         timescale = era = flags = server_cookie = client_cookie = None
         reference_id = reference_ts = origin_ts = None
         server_info = reference_ids_resp = reference_ts_ = secondary_rx_ts = draft_id = None
+        time_sources_resp = None
 
         root_disp = self.root_disp
         if self.stratum > 1:
@@ -581,6 +645,9 @@ class NtpServer:
                     request.reference_ids_req[0] + request.reference_ids_req[1] <= len(self.reference_ids):
                 reference_ids_resp = self.reference_ids[request.reference_ids_req[0]:
                                                         request.reference_ids_req[0] + request.reference_ids_req[1]]
+            if request.time_sources_req is not None:
+                time_sources_resp = self.time_sources[request.time_sources_req[0]:
+                                                      request.time_sources_req[0] + request.time_sources_req[1] // 8]
             if request.reference_ts_ is not None:
                 reference_ts_ = self.reference_ts
             if request.secondary_rx_ts is not None:
@@ -613,6 +680,7 @@ class NtpServer:
                           self.leap5, timescale, era, flags, server_cookie, client_cookie,
                           self.leap4, reference_id, reference_ts, origin_ts,
                           server_info=server_info, reference_ids_resp=reference_ids_resp,
+                          time_sources_resp=time_sources_resp,
                           reference_ts_=reference_ts_, secondary_rx_ts=secondary_rx_ts,
                           draft_id=draft_id)
 
@@ -761,13 +829,16 @@ class NtpNode:
         if len(selected_sources) > 0:
             best_sample = selected_sources[0][1]
             selected_reference_ids = []
+            selected_time_sources = []
             for i, (address, sample, reference_ids) in enumerate(selected_sources):
                 logging.info("  {}: Selected #{}".format(address, i + 1))
                 selected_reference_ids.append(reference_ids)
+                selected_time_sources.append((0, ipaddress.IPv4Address(address[0])))
 
             self.server.set_reference(best_sample.stratum + 1,
                                       int(ipaddress.IPv4Address(selected_sources[0][0][0])),
                                       selected_reference_ids,
+                                      selected_time_sources,
                                       read_clock(self.server.precision),
                                       best_sample.root_delay,
                                       best_sample.root_disp)
