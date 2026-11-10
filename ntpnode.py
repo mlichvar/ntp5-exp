@@ -76,7 +76,7 @@ class Ntp5TimeSourceType(enum.IntEnum):
     IPV6_ADDRESS = 0x2
     NTP_REFID_CODE = 0x3
 
-OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-09+"
+OUR_DRAFT_ID = "draft-ietf-ntp-ntpv5-10"
 
 NUM_REFERENCE_IDS = 32
 REFERENCE_ID_BITS = 56
