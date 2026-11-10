@@ -223,7 +223,7 @@ class NtpMessage:
                     (version == 4 and (ef_len < 16 or ef_len % 4 != 0)):
                 raise ValueError("Invalid format")
 
-            if ef_type == NtpEF.REFERENCE_IDS_REQ:
+            if ef_type == NtpEF.REFERENCE_IDS_REQ and ef_len >= 12 and ef_len % 8 == 4:
                 reference_ids_req = (struct.unpack("!B", extensions[4:5])[0], (ef_len - 4) // 8)
             elif ef_type == NtpEF.REFERENCE_IDS_RESP:
                 reference_ids_resp = NtpMessage.decode_reference_ids(extensions[4:ef_len])
